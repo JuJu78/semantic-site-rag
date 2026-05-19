@@ -24,8 +24,10 @@ This project is designed for SEO practitioners, content teams, and technical beg
 
 ## Quick Start
 
+Full French beginner tutorial: `docs/tutorial-fr.md`.
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/semantic-site-rag.git
+git clone https://github.com/JuJu78/semantic-site-rag.git
 cd semantic-site-rag
 python -m venv .venv
 .venv\Scripts\activate
