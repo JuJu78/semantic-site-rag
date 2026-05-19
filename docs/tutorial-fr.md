@@ -232,6 +232,14 @@ Pour faire un petit test sur une seule URL avant de crawler tout le site :
 python scripts/ingest_site.py --sitemap https://example.com/sitemap.xml --limit 1
 ```
 
+Pour injecter une URL spécifique qui vient d'être publiée :
+
+```bash
+python scripts/ingest_site.py --url https://example.com/nouvelle-page
+```
+
+C'est le bon mode quand la page existe déjà publiquement et que vous voulez l'ajouter dans Supabase avec son contenu, ses chunks, ses embeddings et ses liens internes.
+
 Le script va :
 
 1. lire le sitemap ;
@@ -423,6 +431,67 @@ Pour cette URL, liste toutes les ancres internes utilisées.
 Dis-moi si les ancres sont trop répétitives, trop vagues ou bien diversifiées.
 ```
 
+## Étape 13 : trouver des opportunités de maillage depuis un brouillon
+
+Il y a un cas très fréquent : vous avez un nouveau contenu en cours de rédaction, mais il n'est pas encore publié.
+
+Dans ce cas, il ne faut pas forcément l'insérer dans Supabase.
+
+Le bon fonctionnement est différent :
+
+1. lire le contenu brut ;
+2. calculer un embedding temporaire ;
+3. chercher les pages et chunks déjà stockés les plus proches ;
+4. retourner les meilleures URLs candidates pour le maillage ;
+5. ne rien stocker en base.
+
+Créez par exemple un fichier :
+
+```text
+draft.md
+```
+
+Puis lancez :
+
+```bash
+python scripts/find_link_opportunities.py --text-file draft.md
+```
+
+Le script écrit :
+
+```text
+reports/link_opportunities.json
+```
+
+Ce rapport contient :
+
+- les pages les plus proches au niveau page ;
+- les URLs dont certains chunks sont proches du brouillon ;
+- des extraits de chunks utiles pour comprendre pourquoi une page ressort ;
+- une note explicite confirmant que le contenu brut n'a pas été stocké dans Supabase.
+
+Vous pouvez aussi passer du texte directement :
+
+```bash
+python scripts/find_link_opportunities.py --text "Votre contenu brut ici"
+```
+
+Ce mode est idéal avant publication.
+
+Une fois le contenu publié, utilisez ensuite :
+
+```bash
+python scripts/ingest_site.py --url https://example.com/nouvelle-page
+```
+
+Vous avez donc deux workflows complémentaires :
+
+`find_link_opportunities.py`
+: analyse un brouillon sans stockage.
+
+`ingest_site.py --url`
+: stocke une URL publiée dans Supabase.
+
 ## Cas d'usage SEO concrets
 
 ### 1. Trouver les pages sous-maillées
@@ -579,4 +648,3 @@ Vous pouvez demander à ChatGPT ou Codex de raisonner sur :
 - vos pages proches ou éloignées sémantiquement.
 
 Le vrai gain n'est pas seulement technique. Le vrai gain, c'est de transformer votre site en corpus exploitable pour piloter votre SEO avec beaucoup plus de précision.
-

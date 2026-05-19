@@ -65,6 +65,20 @@ class RagDatabase:
         for url, score in scores.items():
             self.client.table("rag_pages").update({"pagerank": score}).eq("url", url).execute()
 
+    def match_pages(self, embedding: list[float], match_count: int = 10) -> list[dict]:
+        result = self.client.rpc(
+            "match_rag_pages",
+            {"query_embedding": embedding, "match_count": match_count},
+        ).execute()
+        return result.data or []
+
+    def match_chunks(self, embedding: list[float], match_count: int = 20) -> list[dict]:
+        result = self.client.rpc(
+            "match_rag_chunks",
+            {"query_embedding": embedding, "match_count": match_count},
+        ).execute()
+        return result.data or []
+
 
 def parse_embedding(value: object) -> list[float] | None:
     if value is None:

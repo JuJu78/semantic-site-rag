@@ -46,6 +46,12 @@ Then:
 python scripts/ingest_site.py --sitemap https://example.com/sitemap.xml
 ```
 
+You can also store one newly published URL:
+
+```bash
+python scripts/ingest_site.py --url https://example.com/new-page
+```
+
 5. Compute PageRank:
 
 ```bash
@@ -57,6 +63,14 @@ python scripts/compute_pagerank.py
 ```bash
 python scripts/refresh_daily.py --sitemap https://example.com/sitemap.xml
 ```
+
+7. Find internal-link opportunities from a draft without storing it:
+
+```bash
+python scripts/find_link_opportunities.py --text-file draft.md
+```
+
+This creates a temporary embedding for the draft, searches stored Supabase pages and chunks, and writes `reports/link_opportunities.json`. The draft content and embedding are not inserted into Supabase.
 
 ## Connect To ChatGPT Or Codex
 
