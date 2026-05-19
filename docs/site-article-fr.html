@@ -1,0 +1,367 @@
+<p>Un site web n'est pas seulement une collection de pages. C'est un corpus.</p>
+
+<p>Et si ce corpus est bien structuré, il peut devenir une base de connaissance interrogeable par ChatGPT, Codex ou n'importe quel assistant connecté à Supabase.</p>
+
+<p>Dans ce tutoriel, nous allons construire un <strong>RAG SEO vivant</strong> pour un site web : une base Supabase qui contient les URLs du site, les contenus, les chunks, les embeddings, les liens internes, les ancres de lien et quelques signaux utiles pour piloter le maillage interne.</p>
+
+<p>L'objectif n'est pas de faire une démo RAG de plus. L'objectif est de construire un système utile pour répondre à des questions concrètes :</p>
+
+<ul>
+  <li>quelles pages ont trop peu de liens internes ?</li>
+  <li>quelles pages sont proches sémantiquement et devraient être reliées ?</li>
+  <li>quelles ancres pointent vers une URL donnée ?</li>
+  <li>quelles pages sont éloignées du thème principal du site ?</li>
+  <li>quelles URLs ont disparu du sitemap ?</li>
+  <li>quelles pages ont changé depuis la dernière mise à jour ?</li>
+  <li>quelles pages faut-il réembedder, et lesquelles faut-il laisser tranquilles pour éviter les coûts inutiles ?</li>
+</ul>
+
+<p>Le repo utilisé dans ce guide est disponible ici :</p>
+
+<pre><code>https://github.com/JuJu78/semantic-site-rag</code></pre>
+
+<h2>Ce que nous allons construire</h2>
+
+<p>Nous allons créer une base de données Supabase capable de stocker :</p>
+
+<ul>
+  <li>une table de pages, avec une URL par ligne ;</li>
+  <li>une table de chunks, avec plusieurs passages par page ;</li>
+  <li>un embedding pour chaque page ;</li>
+  <li>un embedding pour chaque chunk ;</li>
+  <li>les liens internes détectés dans chaque page ;</li>
+  <li>les ancres utilisées dans ces liens ;</li>
+  <li>un PageRank interne ;</li>
+  <li>un hash de contenu pour ne réembedder que les pages modifiées ;</li>
+  <li>des informations de présence ou d'absence dans le sitemap.</li>
+</ul>
+
+<p>Une fois cette base en place, vous pouvez connecter Supabase à ChatGPT ou Codex et demander à l'assistant de raisonner sur l'état réel de votre site.</p>
+
+<h2>Pourquoi Supabase est intéressant pour ce cas d'usage</h2>
+
+<p>Supabase combine PostgreSQL, une API simple, et l'extension <code>pgvector</code>.</p>
+
+<p>En clair, cela permet de stocker des données classiques, comme des URLs ou des ancres, mais aussi des vecteurs sémantiques. Ces vecteurs sont les embeddings générés à partir de vos contenus.</p>
+
+<p>C'est précisément ce qu'il nous faut pour un RAG SEO :</p>
+
+<ul>
+  <li>PostgreSQL pour les pages, les chunks et les liens ;</li>
+  <li><code>pgvector</code> pour la recherche sémantique ;</li>
+  <li>le connecteur Supabase de ChatGPT ou Codex pour interroger la base ;</li>
+  <li>un script Python pour garder les données à jour.</li>
+</ul>
+
+<p>Pour un petit ou moyen site, le plan gratuit de Supabase permet déjà d'aller loin. Il faut évidemment surveiller les limites, mais pour apprendre et prototyper, c'est très confortable.</p>
+
+<h2>Pré-requis</h2>
+
+<p>Vous aurez besoin de :</p>
+
+<ul>
+  <li>un compte Supabase ;</li>
+  <li>une clé API OpenAI ;</li>
+  <li>Python installé sur votre machine ;</li>
+  <li>un terminal ;</li>
+  <li>un sitemap XML de votre site.</li>
+</ul>
+
+<p>Si vous débutez complètement avec Supabase, ce n'est pas un problème. Nous allons dérouler les étapes dans l'ordre.</p>
+
+<h2>Étape 1 : créer un projet Supabase</h2>
+
+<p>Allez sur Supabase :</p>
+
+<pre><code>https://supabase.com/</code></pre>
+
+<p>Créez un compte, puis créez un nouveau projet.</p>
+
+<p>Supabase vous demandera un nom de projet, un mot de passe de base de données et une région d'hébergement.</p>
+
+<p>Une fois le projet créé, ouvrez :</p>
+
+<pre><code>Project Settings &gt; API</code></pre>
+
+<p>Récupérez deux informations :</p>
+
+<ul>
+  <li><code>Project URL</code></li>
+  <li><code>service_role key</code></li>
+</ul>
+
+<p>La clé <code>service_role</code> donne beaucoup de droits. Ne la mettez jamais dans un repo public. Elle doit rester dans votre fichier <code>.env</code>.</p>
+
+<h2>Étape 2 : activer pgvector</h2>
+
+<p>Dans Supabase, ouvrez le SQL Editor et exécutez le fichier :</p>
+
+<pre><code>sql/001_enable_pgvector.sql</code></pre>
+
+<p>Il contient :</p>
+
+<pre><code class="language-sql">create extension if not exists vector;</code></pre>
+
+<p>Cette extension permet à PostgreSQL de stocker et comparer des embeddings.</p>
+
+<h2>Étape 3 : créer les tables</h2>
+
+<p>Exécutez ensuite :</p>
+
+<pre><code>sql/002_create_tables.sql</code></pre>
+
+<p>Ce script crée les tables principales.</p>
+
+<p><code>rag_pages</code> contient une ligne par URL. On y stocke le titre, la description, le contenu complet, le hash du contenu, l'embedding de page, le PageRank et les informations de sitemap.</p>
+
+<p><code>rag_chunks</code> contient plusieurs lignes par URL. Chaque ligne correspond à un morceau de contenu, avec son propre embedding.</p>
+
+<p><code>rag_links</code> contient les liens internes détectés, avec l'URL source, l'URL cible et l'ancre.</p>
+
+<p><code>rag_refresh_runs</code> sert à suivre les mises à jour.</p>
+
+<p>Exécutez enfin :</p>
+
+<pre><code>sql/003_create_match_functions.sql</code></pre>
+
+<p>Ce fichier ajoute les fonctions SQL de recherche vectorielle, comme <code>match_rag_pages</code> et <code>match_rag_chunks</code>.</p>
+
+<h2>Étape 4 : installer le repo</h2>
+
+<p>Dans votre terminal :</p>
+
+<pre><code class="language-bash">git clone https://github.com/JuJu78/semantic-site-rag.git
+cd semantic-site-rag</code></pre>
+
+<p>Créez un environnement virtuel :</p>
+
+<pre><code class="language-bash">python -m venv .venv</code></pre>
+
+<p>Sur Windows :</p>
+
+<pre><code class="language-bash">.venv\Scripts\activate</code></pre>
+
+<p>Sur macOS ou Linux :</p>
+
+<pre><code class="language-bash">source .venv/bin/activate</code></pre>
+
+<p>Installez les dépendances :</p>
+
+<pre><code class="language-bash">pip install -r requirements.txt</code></pre>
+
+<h2>Étape 5 : configurer le fichier .env</h2>
+
+<p>Copiez le fichier d'exemple :</p>
+
+<pre><code class="language-bash">copy .env.example .env</code></pre>
+
+<p>Sur macOS ou Linux :</p>
+
+<pre><code class="language-bash">cp .env.example .env</code></pre>
+
+<p>Remplissez ensuite les variables :</p>
+
+<pre><code class="language-env">OPENAI_API_KEY=sk-...
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SITE_BASE_URL=https://example.com
+CHUNK_SIZE=1200
+CHUNK_OVERLAP=180
+REQUEST_TIMEOUT=30
+CRAWL_DELAY_SECONDS=1.0
+USER_AGENT=SemanticSiteRAG/0.1 (+https://example.com)</code></pre>
+
+<p>Remplacez <code>https://example.com</code> par votre domaine.</p>
+
+<h2>Étape 6 : lancer le premier crawl</h2>
+
+<p>Pour crawler un sitemap :</p>
+
+<pre><code class="language-bash">python scripts/ingest_site.py --sitemap https://example.com/sitemap.xml</code></pre>
+
+<p>Pour plusieurs sitemaps :</p>
+
+<pre><code class="language-bash">python scripts/ingest_site.py --sitemap https://example.com/sitemap-fr.xml --sitemap https://example.com/sitemap-en.xml</code></pre>
+
+<p>Pour tester sur une seule URL du sitemap :</p>
+
+<pre><code class="language-bash">python scripts/ingest_site.py --sitemap https://example.com/sitemap.xml --limit 1</code></pre>
+
+<p>Le script va lire le sitemap, récupérer les URLs, télécharger les pages, extraire le contenu principal, générer les embeddings, découper les pages en chunks et stocker les liens internes trouvés.</p>
+
+<h2>Étape 7 : injecter une URL spécifique</h2>
+
+<p>Cas typique : vous venez de publier un nouvel article et il n'est pas encore dans Supabase.</p>
+
+<p>Vous pouvez l'injecter directement :</p>
+
+<pre><code class="language-bash">python scripts/ingest_site.py --url https://example.com/nouvelle-page</code></pre>
+
+<p>Ce mode est utile après publication. La page existe en ligne, donc le script peut la crawler, extraire son contenu, stocker ses chunks, générer ses embeddings et enregistrer les liens internes qu'elle contient.</p>
+
+<h2>Étape 8 : trouver des opportunités de maillage depuis un brouillon</h2>
+
+<p>Autre cas très utile : vous avez un contenu brut, mais il n'est pas encore publié.</p>
+
+<p>Dans ce cas, il ne faut pas forcément le stocker dans Supabase. On veut seulement savoir quelles pages existantes sont les plus proches sémantiquement.</p>
+
+<p>Le repo contient donc un script séparé :</p>
+
+<pre><code class="language-bash">python scripts/find_link_opportunities.py --text-file draft.md</code></pre>
+
+<p>Ce script lit le brouillon, calcule un embedding temporaire, interroge les pages et chunks déjà stockés dans Supabase, puis génère :</p>
+
+<pre><code>reports/link_opportunities.json</code></pre>
+
+<p>Point important : le texte brut et son embedding ne sont pas insérés dans Supabase.</p>
+
+<p>Vous obtenez un rapport avec les pages les plus proches, les chunks qui justifient la proximité et les URLs candidates pour le maillage interne.</p>
+
+<p>Vous pouvez ensuite demander à ChatGPT ou Codex :</p>
+
+<pre><code>À partir de reports/link_opportunities.json, propose-moi les liens internes à ajouter dans mon brouillon.
+Pour chaque recommandation, donne l'URL cible, l'ancre proposée et la justification.</code></pre>
+
+<h2>Étape 9 : calculer le PageRank interne</h2>
+
+<p>Une fois les liens internes stockés, vous pouvez calculer un PageRank interne :</p>
+
+<pre><code class="language-bash">python scripts/compute_pagerank.py</code></pre>
+
+<p>Ce score n'est pas le PageRank Google. C'est un indicateur interne qui permet de comparer les pages selon le poids transmis par votre propre maillage.</p>
+
+<h2>Étape 10 : auditer le maillage interne</h2>
+
+<p>Lancez :</p>
+
+<pre><code class="language-bash">python scripts/audit_site.py --min-incoming 3</code></pre>
+
+<p>Le script produit :</p>
+
+<pre><code>reports/site_audit.json</code></pre>
+
+<p>Vous y trouverez notamment les pages avec trop peu de liens internes entrants, les pages les plus éloignées du centroïde sémantique du site, leur PageRank interne et leurs liens entrants/sortants.</p>
+
+<p>Le centroïde sémantique correspond à la moyenne des embeddings de vos pages. Une page très éloignée du centroïde peut être hors sujet, mal extraite, isolée dans un silo ou simplement insuffisamment reliée au reste du corpus.</p>
+
+<p>Ce n'est pas une preuve automatique. C'est un signal d'investigation.</p>
+
+<h2>Étape 11 : mettre à jour la base sans tout réembedder</h2>
+
+<p>Le piège classique d'un RAG de site web est de tout réembedder tous les jours.</p>
+
+<p>Sur un petit site, ce n'est pas dramatique. Sur un gros site, cela devient vite inutilement coûteux.</p>
+
+<p>Le repo évite cela avec un hash de contenu.</p>
+
+<p>À chaque refresh, le script recrawle la page, recalcule le hash, puis le compare au hash stocké dans Supabase.</p>
+
+<p>Si le contenu n'a pas changé, la page n'est pas réembeddée.</p>
+
+<p>Si le contenu a changé, la page est mise à jour, les anciens chunks sont remplacés et les embeddings sont régénérés.</p>
+
+<p>Lancez :</p>
+
+<pre><code class="language-bash">python scripts/refresh_daily.py --sitemap https://example.com/sitemap.xml</code></pre>
+
+<p>Le script marque aussi les URLs présentes en base mais absentes du sitemap. C'est utile pour repérer les pages supprimées, redirigées ou qui ne devraient plus rester dans votre base RAG.</p>
+
+<h2>Étape 12 : automatiser le refresh quotidien</h2>
+
+<p>Sur Windows, vous pouvez utiliser le Planificateur de tâches avec une commande de ce type :</p>
+
+<pre><code class="language-bash">D:\path\to\semantic-site-rag\.venv\Scripts\python.exe D:\path\to\semantic-site-rag\scripts\refresh_daily.py --sitemap https://example.com/sitemap.xml</code></pre>
+
+<p>Sur Linux, vous pouvez utiliser cron :</p>
+
+<pre><code class="language-bash">0 6 * * * cd /path/to/semantic-site-rag &amp;&amp; /path/to/semantic-site-rag/.venv/bin/python scripts/refresh_daily.py --sitemap https://example.com/sitemap.xml</code></pre>
+
+<p>Le repo contient aussi un exemple GitHub Actions :</p>
+
+<pre><code>.github/workflows/daily-refresh.yml</code></pre>
+
+<p>Dans GitHub, ajoutez les secrets nécessaires :</p>
+
+<ul>
+  <li><code>SITEMAP_URL</code></li>
+  <li><code>OPENAI_API_KEY</code></li>
+  <li><code>SUPABASE_URL</code></li>
+  <li><code>SUPABASE_SERVICE_ROLE_KEY</code></li>
+</ul>
+
+<h2>Étape 13 : connecter Supabase à ChatGPT ou Codex</h2>
+
+<p>Une fois les données en base, connectez Supabase à ChatGPT ou Codex via le connecteur natif.</p>
+
+<p>L'assistant pourra alors interroger :</p>
+
+<ul>
+  <li><code>rag_pages</code></li>
+  <li><code>rag_chunks</code></li>
+  <li><code>rag_links</code></li>
+  <li><code>rag_refresh_runs</code></li>
+</ul>
+
+<p>Vous pouvez lui demander :</p>
+
+<pre><code>Liste les 20 pages qui ont le moins de liens internes entrants.
+Pour chaque page, propose 5 pages sources qui pourraient faire un lien vers elle.
+Utilise la proximité sémantique des chunks et les ancres existantes comme indices.</code></pre>
+
+<p>Ou :</p>
+
+<pre><code>Trouve les pages les plus éloignées du centroïde sémantique du site.
+Explique si elles semblent hors sujet, isolées ou simplement mal reliées.</code></pre>
+
+<p>Ou encore :</p>
+
+<pre><code>Pour cette URL, liste toutes les ancres internes utilisées.
+Dis-moi si les ancres sont trop répétitives, trop vagues ou bien diversifiées.</code></pre>
+
+<h2>Pourquoi stocker les pages et les chunks ?</h2>
+
+<p>L'embedding de page donne une vision globale d'une URL. Il sert à comparer des pages entre elles, calculer un centroïde et repérer des pages éloignées.</p>
+
+<p>L'embedding de chunk donne une vision plus précise. Il permet de retrouver un passage exact, de proposer un lien interne depuis une section spécifique ou de répondre à une question très ciblée.</p>
+
+<p>Un bon RAG SEO a besoin des deux niveaux.</p>
+
+<h2>Ce que ce système permet concrètement</h2>
+
+<p>Une fois en place, vous pouvez utiliser cette base pour :</p>
+
+<ul>
+  <li>trouver les pages sous-maillées ;</li>
+  <li>proposer des liens internes depuis des contenus proches ;</li>
+  <li>auditer les ancres de lien ;</li>
+  <li>repérer les contenus isolés ;</li>
+  <li>identifier des contenus proches qui méritent d'être consolidés ;</li>
+  <li>nettoyer les anciennes URLs absentes du sitemap ;</li>
+  <li>préparer le maillage d'un brouillon avant publication ;</li>
+  <li>garder une base RAG à jour sans exploser les coûts d'embedding.</li>
+</ul>
+
+<p>Il faut toutefois rester rigoureux : une forte proximité sémantique ne prouve pas à elle seule une cannibalisation SEO. Pour parler de cannibalisation, il faut idéalement croiser avec Google Search Console et les requêtes réellement positionnées.</p>
+
+<h2>Limites</h2>
+
+<p>Ce projet est une base pédagogique et open-source. Il ne remplace pas un crawl SEO complet, une analyse de logs, Google Search Console ou un audit éditorial humain.</p>
+
+<p>Il donne en revanche une fondation très solide pour construire un assistant SEO connecté à l'état réel de votre site.</p>
+
+<p>Autre limite : l'extraction de contenu n'est jamais parfaite. Certains sites très JavaScript, très bloqués ou mal structurés peuvent nécessiter des adaptations.</p>
+
+<h2>Conclusion</h2>
+
+<p>Le vrai intérêt de ce système n'est pas seulement technique.</p>
+
+<p>Le vrai intérêt, c'est de transformer votre site en corpus exploitable.</p>
+
+<p>Au lieu de demander à un LLM de raisonner dans le vide, vous lui donnez une base structurée : pages, chunks, liens, ancres, embeddings, sitemap, PageRank interne.</p>
+
+<p>Vous pouvez alors piloter votre SEO avec beaucoup plus de précision, notamment sur le maillage interne, la cohérence sémantique et la fraîcheur des données.</p>
+
+<p>Et surtout, vous pouvez le faire de manière incrémentale : seules les pages réellement modifiées sont réembeddées.</p>
+
+<p>C'est ce qui rend le système utilisable dans la durée.</p>
