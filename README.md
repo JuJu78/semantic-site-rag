@@ -38,7 +38,7 @@ copy .env.example .env
 Then:
 
 1. Create a Supabase project.
-2. Run the SQL files in `sql/` from the Supabase SQL editor.
+2. Run the SQL files in `sql/` from the Supabase SQL editor, in numerical order. `004_enable_rls.sql` enables Row Level Security on every RAG table and is **mandatory** (see [Security](#security)).
 3. Fill `.env` with your Supabase and OpenAI keys.
 4. Run your first crawl:
 
@@ -79,6 +79,19 @@ Once the data is in Supabase, connect the native Supabase connector to ChatGPT o
 ## Cost Control
 
 The refresh script stores a content hash for every page. If a URL has not changed since the last crawl, it is not re-embedded. This avoids paying every day to embed the same website again.
+
+## Security
+
+Supabase exposes every table created in the `public` schema through its PostgREST API. By default the `anon` API key — the one you would naturally paste into a frontend, a notebook, or a third-party tool — can read **and write** the RAG tables. That means anyone who gets hold of that key can scrape your entire crawl, inject fake links, or wipe rows.
+
+This repository ships `sql/004_enable_rls.sql`, which turns on Row Level Security on all RAG tables without attaching any policy. The ingestion and refresh scripts connect with the `service_role` key (which bypasses RLS), so the crawler keeps working, while `anon` and `authenticated` requests are denied by default.
+
+Two rules to keep this safe over time:
+
+- **Never commit your `service_role` key.** It has full write access to your database. Treat it like a root password.
+- If you later expose this data publicly (a dashboard, a chatbot, an embedding-search demo), add explicit `create policy` statements granting `select` only — never `insert`, `update`, or `delete` to the `anon` role.
+
+Reference: [Supabase Row Level Security documentation](https://supabase.com/docs/guides/database/postgres/row-level-security).
 
 ## License
 
