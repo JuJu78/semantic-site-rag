@@ -96,3 +96,13 @@ Reference: [Supabase Row Level Security documentation](https://supabase.com/docs
 ## License
 
 MIT
+
+---
+
+## About The Author
+
+Built and maintained by **Julien Gourdon** — independent SEO consultant working on the intersection of search engines, LLMs, and content strategy.
+
+I write about practical RAG, generative SEO, and AI-assisted editorial workflows on my site: [**julien-gourdon.fr**](https://julien-gourdon.fr/).
+
+Feedback, pull requests, and bug reports are welcome.
